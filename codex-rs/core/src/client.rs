@@ -124,6 +124,7 @@ impl ModelClient {
                 // Create the raw streaming connection first.
                 let response_stream = stream_chat_completions(
                     prompt,
+                    &self.config.model,
                     &self.config.model_family,
                     &self.client,
                     &self.provider,

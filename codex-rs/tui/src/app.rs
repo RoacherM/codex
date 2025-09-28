@@ -13,6 +13,8 @@ use codex_core::AuthManager;
 use codex_core::ConversationManager;
 use codex_core::config::Config;
 use codex_core::config::persist_model_selection;
+use codex_core::config_edit::CONFIG_KEY_MODEL_PROVIDER;
+use codex_core::config_edit::persist_overrides;
 use codex_core::model_family::find_family_for_model;
 use codex_core::protocol::TokenUsage;
 use codex_core::protocol_config_types::ReasoningEffort as ReasoningEffortConfig;
@@ -348,6 +350,34 @@ impl App {
                     }
                 }
             }
+            AppEvent::UpdateModelProvider(provider_id) => {
+                // Update widget + app config with the selected provider.
+                self.chat_widget.set_model_provider(&provider_id);
+                if let Some(info) = self.config.model_providers.get(&provider_id).cloned() {
+                    self.config.model_provider_id = provider_id;
+                    self.config.model_provider = info;
+                }
+            }
+            AppEvent::PersistModelProviderSelection(provider_id) => {
+                let profile = self.active_profile.as_deref();
+                let r = persist_overrides(
+                    &self.config.codex_home,
+                    profile,
+                    &[(&[CONFIG_KEY_MODEL_PROVIDER], provider_id.as_str())],
+                )
+                .await;
+                if let Err(err) = r {
+                    tracing::error!(error = %err, "failed to persist model provider selection");
+                    if let Some(profile) = profile {
+                        self.chat_widget.add_error_message(format!(
+                            "Failed to save provider for profile `{profile}`: {err}"
+                        ));
+                    } else {
+                        self.chat_widget
+                            .add_error_message(format!("Failed to save default provider: {err}"));
+                    }
+                }
+            }
             AppEvent::UpdateAskForApprovalPolicy(policy) => {
                 self.chat_widget.set_approval_policy(policy);
             }
@@ -362,6 +392,9 @@ impl App {
             }
             AppEvent::OpenReviewCustomPrompt => {
                 self.chat_widget.show_review_custom_prompt();
+            }
+            AppEvent::OpenModelPopup => {
+                self.chat_widget.open_model_popup();
             }
         }
         Ok(true)

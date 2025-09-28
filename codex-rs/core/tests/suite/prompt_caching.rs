@@ -417,6 +417,7 @@ async fn overrides_turn_context_but_keeps_cached_prefix_and_key_constant() {
                 exclude_slash_tmp: true,
             }),
             model: Some("o3".to_string()),
+            model_provider: None,
             effort: Some(Some(ReasoningEffort::High)),
             summary: Some(ReasoningSummary::Detailed),
         })

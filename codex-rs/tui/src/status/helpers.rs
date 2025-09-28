@@ -28,6 +28,11 @@ pub(crate) fn compose_model_display(
         }
     }
 
+    // Append provider id to the details so `/status` shows which provider is active.
+    if !config.model_provider_id.is_empty() {
+        details.push(format!("provider {}", config.model_provider_id));
+    }
+
     (config.model.clone(), details)
 }
 

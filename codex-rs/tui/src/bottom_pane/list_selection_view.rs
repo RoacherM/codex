@@ -185,6 +185,8 @@ impl ListSelectionView {
                         match_indices: None,
                         is_current: item.is_current,
                         description: item.description.clone(),
+                        // If there are no actions, treat as disabled: dim + no highlight/accept.
+                        disabled: item.actions.is_empty(),
                     }
                 })
             })
@@ -209,6 +211,7 @@ impl ListSelectionView {
         if let Some(idx) = self.state.selected_idx
             && let Some(actual_idx) = self.filtered_indices.get(idx)
             && let Some(item) = self.items.get(*actual_idx)
+            && !item.actions.is_empty()
         {
             self.last_selected_actual_idx = Some(*actual_idx);
             for act in &item.actions {

@@ -6,6 +6,7 @@ use toml_edit::DocumentMut;
 
 pub const CONFIG_KEY_MODEL: &str = "model";
 pub const CONFIG_KEY_EFFORT: &str = "model_reasoning_effort";
+pub const CONFIG_KEY_MODEL_PROVIDER: &str = "model_provider";
 
 #[derive(Copy, Clone)]
 enum NoneBehavior {

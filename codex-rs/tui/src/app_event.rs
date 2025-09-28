@@ -59,6 +59,12 @@ pub(crate) enum AppEvent {
         effort: Option<ReasoningEffort>,
     },
 
+    /// Update the current model provider id and info in the running app/widget.
+    UpdateModelProvider(String),
+
+    /// Persist the selected model provider to the appropriate config location.
+    PersistModelProviderSelection(String),
+
     /// Update the current approval policy in the running app and widget.
     UpdateAskForApprovalPolicy(AskForApproval),
 
@@ -76,4 +82,7 @@ pub(crate) enum AppEvent {
 
     /// Open the custom prompt option from the review popup.
     OpenReviewCustomPrompt,
+
+    /// Open the model selection popup.
+    OpenModelPopup,
 }

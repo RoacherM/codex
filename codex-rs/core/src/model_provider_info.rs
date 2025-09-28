@@ -102,13 +102,27 @@ impl ModelProviderInfo {
         client: &'a reqwest::Client,
         auth: &Option<CodexAuth>,
     ) -> crate::error::Result<reqwest::RequestBuilder> {
+        // Authentication selection rules:
+        // - If the provider defines an `env_key` and the variable is set, use it (Bearer API key).
+        // - If the provider defines an `env_key` but it is missing/empty:
+        //     • Only fall back to `auth` (ChatGPT/OpenAI login token) when this provider
+        //       explicitly requires OpenAI auth (i.e., `requires_openai_auth == true`).
+        //     • For third‑party providers (the common case), surface the missing env var
+        //       error instead of silently using an unrelated token.
+        // - If the provider does not define an `env_key`, use `auth` as‑is.
         let effective_auth = match self.api_key() {
             Ok(Some(key)) => Some(CodexAuth::from_api_key(&key)),
             Ok(None) => auth.clone(),
             Err(err) => {
-                if auth.is_some() {
-                    auth.clone()
+                if self.requires_openai_auth {
+                    // Built‑in OpenAI provider: prefer interactive/login auth when available.
+                    if auth.is_some() {
+                        auth.clone()
+                    } else {
+                        return Err(err);
+                    }
                 } else {
+                    // Third‑party provider requires its own API key – propagate the explicit error.
                     return Err(err);
                 }
             }

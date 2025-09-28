@@ -31,6 +31,7 @@ use codex_protocol::models::ResponseItem;
 /// Implementation for the classic Chat Completions API.
 pub(crate) async fn stream_chat_completions(
     prompt: &Prompt,
+    model_slug: &str,
     model_family: &ModelFamily,
     client: &reqwest::Client,
     provider: &ModelProviderInfo,
@@ -275,7 +276,10 @@ pub(crate) async fn stream_chat_completions(
 
     let tools_json = create_tools_json_for_chat_completions_api(&prompt.tools)?;
     let payload = json!({
-        "model": model_family.slug,
+        // Always send the actual configured model slug. For third‑party providers where
+        // the model family is unknown to Codex, falling back to a previous family (e.g.,
+        // "gpt-5") would yield provider errors like "Model Not Exist".
+        "model": model_slug,
         "messages": messages,
         "stream": true,
         "tools": tools_json,

@@ -171,6 +171,7 @@ impl CommandPopup {
                     match_indices: indices.map(|v| v.into_iter().map(|i| i + 1).collect()),
                     is_current: false,
                     description: Some(description),
+                    disabled: false,
                 }
             })
             .collect()

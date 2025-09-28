@@ -1092,12 +1092,13 @@ async fn submission_loop(
                 approval_policy,
                 sandbox_policy,
                 model,
+                model_provider,
                 effort,
                 summary,
             } => {
                 // Recalculate the persistent turn context with provided overrides.
                 let prev = Arc::clone(&turn_context);
-                let provider = prev.client.get_provider();
+                let prev_provider = prev.client.get_provider();
 
                 // Effective model + family
                 let (effective_model, effective_family) = if let Some(ref m) = model {
@@ -1122,10 +1123,27 @@ async fn submission_loop(
                     updated_config.model_context_window = Some(model_info.context_window);
                 }
 
+                // Apply provider override when requested.
+                let effective_provider = if let Some(ref pid) = model_provider {
+                    if let Some(info) = updated_config.model_providers.get(pid) {
+                        updated_config.model_provider_id = pid.clone();
+                        updated_config.model_provider = info.clone();
+                        info.clone()
+                    } else {
+                        tracing::warn!(
+                            "requested model provider `{}` not found; keeping previous",
+                            pid
+                        );
+                        prev_provider
+                    }
+                } else {
+                    prev_provider
+                };
+
                 let client = ModelClient::new(
                     Arc::new(updated_config),
                     auth_manager,
-                    provider,
+                    effective_provider,
                     effective_effort,
                     effective_summary,
                     sess.conversation_id,
@@ -1443,7 +1461,24 @@ async fn spawn_review_thread(
     sub_id: String,
     review_request: ReviewRequest,
 ) {
-    let model = config.review_model.clone();
+    // Choose a review model compatible with the active provider.
+    // - For the built-in OpenAI provider, honor `review_model` from config.
+    // - For third-party providers (deepseek, moonshot, etc.), default to the
+    //   current session model to avoid provider/model mismatches like
+    //   sending "gpt-5" to non-OpenAI endpoints.
+    // Use the active provider on the parent turn context to decide which model to use.
+    let active_provider = parent_turn_context.client.get_provider();
+    let model = if active_provider.requires_openai_auth {
+        // Built-in OpenAI provider: honor configured review model.
+        config.review_model.clone()
+    } else {
+        // Third-party providers (e.g., deepseek, moonshot, openrouter, azure proxies):
+        // Always use the current session model from the parent turn context. Do NOT
+        // read from the (possibly stale) session config here, as users may have
+        // switched provider/model in-session via /provider and /model.
+        parent_turn_context.client.get_model()
+    };
+
     let review_model_family = find_family_for_model(&model)
         .unwrap_or_else(|| parent_turn_context.client.get_model_family());
     let tools_config = ToolsConfig::new(&ToolsConfigParams {
@@ -1458,7 +1493,7 @@ async fn spawn_review_thread(
 
     let base_instructions = REVIEW_PROMPT.to_string();
     let review_prompt = review_request.prompt.clone();
-    let provider = parent_turn_context.client.get_provider();
+    let provider = active_provider;
     let auth_manager = parent_turn_context.client.get_auth_manager();
     let model_family = review_model_family.clone();
 
@@ -1480,6 +1515,15 @@ async fn spawn_review_thread(
         per_turn_config.model_reasoning_effort,
         per_turn_config.model_reasoning_summary,
         sess.conversation_id,
+    );
+
+    // Log a concise review context line for easier debugging in the field.
+    tracing::info!(
+        provider = %client.get_provider().name,
+        model = %client.get_model(),
+        wire_api = ?client.get_provider().wire_api,
+        base_url = ?client.get_provider().base_url,
+        "Starting review turn with provider/model"
     );
 
     let review_turn_context = TurnContext {

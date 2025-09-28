@@ -1095,6 +1095,9 @@ impl ChatWidget {
             SlashCommand::Model => {
                 self.open_model_popup();
             }
+            SlashCommand::Provider => {
+                self.open_provider_popup();
+            }
             SlashCommand::Approvals => {
                 self.open_approvals_popup();
             }
@@ -1598,15 +1601,12 @@ impl ChatWidget {
                         approval_policy: None,
                         sandbox_policy: None,
                         model: Some(model_slug.clone()),
+                        model_provider: None,
                         effort: Some(effort),
                         summary: None,
                     }));
                     tx.send(AppEvent::UpdateModel(model_slug.clone()));
                     tx.send(AppEvent::UpdateReasoningEffort(effort));
-                    tx.send(AppEvent::PersistModelSelection {
-                        model: model_slug.clone(),
-                        effort,
-                    });
                     tracing::info!(
                         "New model: {}, New effort: {}, Current model: {}, Current effort: {}",
                         model_slug.clone(),
@@ -1662,22 +1662,20 @@ impl ChatWidget {
                                 return;
                             }
 
-                            let is_current = model_slug == current_model && effort == current_effort;
+                            let is_current =
+                                model_slug == current_model && effort == current_effort;
                             let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
                                 tx.send(AppEvent::CodexOp(Op::OverrideTurnContext {
                                     cwd: None,
                                     approval_policy: None,
                                     sandbox_policy: None,
                                     model: Some(model_slug.clone()),
+                                    model_provider: None,
                                     effort: Some(effort),
                                     summary: None,
                                 }));
                                 tx.send(AppEvent::UpdateModel(model_slug.clone()));
                                 tx.send(AppEvent::UpdateReasoningEffort(effort));
-                                tx.send(AppEvent::PersistModelSelection {
-                                    model: model_slug.clone(),
-                                    effort,
-                                });
                             })];
 
                             items.push(SelectionItem {
@@ -1731,6 +1729,85 @@ impl ChatWidget {
         });
     }
 
+    /// Open a popup to choose the model provider.
+    pub(crate) fn open_provider_popup(&mut self) {
+        let mut items: Vec<SelectionItem> = Vec::new();
+        let current_id = self.config.model_provider_id.clone();
+
+        // Determine if the built-in OSS provider was explicitly configured by the user.
+        // If not present in config.toml, we hide it from the provider picker.
+        let mut user_defined_providers: std::collections::HashSet<String> = Default::default();
+        if let Ok(root) = codex_core::config::load_config_as_toml(&self.config.codex_home) {
+            if let Some(mp) = root.get("model_providers").and_then(|v| v.as_table()) {
+                for k in mp.keys() {
+                    user_defined_providers.insert(k.to_string());
+                }
+            }
+        }
+
+        for (pid, info) in self.config.model_providers.clone() {
+            // Hide built-in OSS provider unless user explicitly configured it.
+            if pid == codex_core::BUILT_IN_OSS_MODEL_PROVIDER_ID
+                && !user_defined_providers.contains(&pid)
+            {
+                continue;
+            }
+            let name = info.name.clone();
+            let is_current = pid == current_id;
+            let pid_clone = pid.clone();
+            // Show a hint when the provider expects an env var key but it's missing/empty.
+            let (description, missing_env) = match info.env_key.as_ref() {
+                Some(key) => match std::env::var(key) {
+                    Ok(v) if !v.trim().is_empty() => (None, false),
+                    _ => (Some(format!("requires {key} (not set)")), true),
+                },
+                None => (None, false),
+            };
+            // Default: do not persist. We will prompt user to choose model next.
+            let _persist_allowed = false;
+            let actions: Vec<SelectionAction> = if missing_env {
+                // Disable selection when required API key is missing.
+                Vec::new()
+            } else {
+                vec![Box::new(move |tx| {
+                    tx.send(AppEvent::CodexOp(Op::OverrideTurnContext {
+                        cwd: None,
+                        approval_policy: None,
+                        sandbox_policy: None,
+                        model: None,
+                        model_provider: Some(pid_clone.clone()),
+                        effort: None,
+                        summary: None,
+                    }));
+                    tx.send(AppEvent::UpdateModelProvider(pid_clone.clone()));
+                    // Immediately prompt user to select a model compatible with the chosen provider.
+                    tx.send(AppEvent::OpenModelPopup);
+                    // Optional future: if user opts-in to persist, send PersistModelProviderSelection here.
+                })]
+            };
+
+            items.push(SelectionItem {
+                name,
+                description,
+                is_current,
+                actions,
+                dismiss_on_select: !missing_env,
+                search_value: None,
+            });
+        }
+
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            title: "Select model provider".to_string(),
+            subtitle: Some(
+                "Switch provider; entries marked 'requires ... (not set)' need an API key"
+                    .to_string(),
+            ),
+            footer_hint: Some(STANDARD_POPUP_HINT_LINE.to_string()),
+            items,
+            ..Default::default()
+        });
+    }
+
     /// Open a popup to choose the approvals mode (ask for approval policy + sandbox policy).
     pub(crate) fn open_approvals_popup(&mut self) {
         let current_approval = self.config.approval_policy;
@@ -1750,6 +1827,7 @@ impl ChatWidget {
                     approval_policy: Some(approval),
                     sandbox_policy: Some(sandbox.clone()),
                     model: None,
+                    model_provider: None,
                     effort: None,
                     summary: None,
                 }));
@@ -1793,6 +1871,14 @@ impl ChatWidget {
     pub(crate) fn set_model(&mut self, model: &str) {
         self.session_header.set_model(model);
         self.config.model = model.to_string();
+    }
+
+    /// Set the model provider in the widget's config copy.
+    pub(crate) fn set_model_provider(&mut self, provider_id: &str) {
+        self.config.model_provider_id = provider_id.to_string();
+        if let Some(_info) = self.config.model_providers.get(provider_id) {
+            // SessionHeader does not show provider explicitly today; keep model label as is.
+        }
     }
 
     pub(crate) fn add_info_message(&mut self, message: String, hint: Option<String>) {

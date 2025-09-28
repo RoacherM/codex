@@ -21,6 +21,7 @@ pub(crate) struct GenericDisplayRow {
     pub match_indices: Option<Vec<usize>>, // indices to bold (char positions)
     pub is_current: bool,
     pub description: Option<String>, // optional grey text after the name
+    pub disabled: bool,              // visually dim and skip highlight/accept
 }
 
 impl GenericDisplayRow {}
@@ -105,7 +106,11 @@ fn build_full_line(row: &GenericDisplayRow, desc_col: usize) -> Line<'static> {
         }
         full_spans.push(desc.clone().dim());
     }
-    Line::from(full_spans)
+    let mut line = Line::from(full_spans);
+    if row.disabled {
+        line = line.dim();
+    }
+    line
 }
 
 /// Render a list of rows using the provided ScrollState, with shared styling
@@ -210,22 +215,7 @@ pub(crate) fn render_rows(
             break;
         }
 
-        let GenericDisplayRow {
-            name,
-            match_indices,
-            is_current: _is_current,
-            description,
-        } = row;
-
-        let full_line = build_full_line(
-            &GenericDisplayRow {
-                name: name.clone(),
-                match_indices: match_indices.clone(),
-                is_current: *_is_current,
-                description: description.clone(),
-            },
-            desc_col,
-        );
+        let full_line = build_full_line(row, desc_col);
 
         // Wrap with subsequent indent aligned to the description column.
         use crate::wrapping::RtOptions;
@@ -240,7 +230,7 @@ pub(crate) fn render_rows(
             if cur_y >= content_area.y + content_area.height {
                 break;
             }
-            if Some(i) == state.selected_idx {
+            if Some(i) == state.selected_idx && !row.disabled {
                 // Match previous behavior: cyan + bold for the selected row.
                 line.style = Style::default()
                     .fg(Color::Cyan)
